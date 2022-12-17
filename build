@@ -28,7 +28,6 @@ make 				O=out \
 				-j${JTHREAD}
 
 mv $KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb $ANYKERNEL_DIR/
-mv $KERNEL_DIR/out/arch/arm64/boot/dtbo.img $ANYKERNEL_DIR/
 cd $ANYKERNEL_DIR
 echo ""
 echo "zipping"
