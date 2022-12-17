@@ -664,6 +664,13 @@ static struct ion_handle *__ion_alloc(
 	return handle;
 }
 
+struct ion_handle *__ion_alloc(struct ion_client *client, size_t len,
+			       size_t align, unsigned int heap_id_mask,
+			       unsigned int flags, bool grab_handle)
+{
+	return __ion_alloc(client, len, align, heap_id_mask, flags, false);
+}
+
 struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
 			     size_t align, unsigned int heap_id_mask,
 			     unsigned int flags)
