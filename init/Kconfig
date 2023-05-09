@@ -2464,3 +2464,7 @@ config ASN1
 	  functions to call on what tags.
 
 source "kernel/Kconfig.locks"
+
+config GIT_VERSION
+	int "Default git verison"
+	default 0

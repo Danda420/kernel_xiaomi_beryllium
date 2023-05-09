@@ -1,53 +1,125 @@
 #!/bin/bash
+clear
 cd ..
 MAIN=$PWD
-cd Optimus_Drunk_Beryllium
+cd kernel_xiaomi_beryllium
 KERNEL_DIR=$PWD
 ANYKERNEL_DIR=$KERNEL_DIR/AnyKernel3
-CLANG_DIR=$MAIN/proton-clang
+CLANG_DIR=$MAIN/clang
 KERNELVER=$(make kernelversion)
+DATE_CLOCK=$(date +'%H%M-%d%m%Y')
 
 if [[ -z "${JTHREAD}" ]]; then
     COUNT="$(grep -c '^processor' /proc/cpuinfo)"
     export JTHREAD="$((COUNT + 2))"
 fi
 
-echo "cleaning..."
-mkdir -p out
-clear
-BUILD_START=$(date +"%s")
+build() {
+	DEFCONFIG=${DEVICE}_defconfig
+	echo "cleaning..."
+	rm -rf $KERNEL_DIR/out/
+	mkdir -p out
+	clear
+	BUILD_START=$(date +"%s")
+	export USE_CCACHE=1
+	export CCACHE_EXEC=/usr/bin/ccache
+	ccache -M 10G
+	ccache -o compression=true
 
-make O=out ARCH=arm64 beryllium_defconfig
+	export PATH="$CLANG_DIR/bin:${PATH}"
+	
+	get_compiler_info="$($CLANG_DIR/bin/clang --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')"
+	get_name=${get_compiler_info%% *}
+	if [[ -z $compiler_name ]]; then
+	   set_compiler=$get_compiler_info
+	else
+	   set_compiler=$(echo $get_compiler_info | sed "s/$get_name/$compiler_name/g")
+	fi;
+	export KBUILD_COMPILER_STRING="$set_compiler"
+	
+	make O=out ARCH=arm64 $DEFCONFIG \
+		ARCH=arm64 \
+		LLVM=1 \
+		LLVM_IAS=1 \
+		CROSS_COMPILE=aarch64-linux-gnu- \
+		CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+		    
+	make O=out \
+		ARCH=arm64 \
+		LLVM=1 \
+		LLVM_IAS=1 \
+		CROSS_COMPILE=aarch64-linux-gnu- \
+		CLANG_TRIPLE=aarch64-linux-gnu- \
+		CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+		-j${JTHREAD} CC="ccache clang"
 
-PATH="$CLANG_DIR/bin:${PATH}" \
-make 				O=out \
-				ARCH=arm64 \
-				CC=clang \
-				CROSS_COMPILE=aarch64-linux-gnu- \
-				CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-				-j${JTHREAD}
+	if [[ -f $KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb ]]; then
 
-mv $KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb $ANYKERNEL_DIR/
-cd $ANYKERNEL_DIR
-echo ""
-echo "zipping"
-DATE_CLOCK=$(date +'%H%M-%d%m%Y')
-ZIPNAME=$KERNELVER-OptimusDrunk-$DATE_CLOCK.zip
-zip -r9 $ZIPNAME META-INF ramdisk tools anykernel.sh banner Image.gz-dtb dtbo.img
-mv $ZIPNAME $KERNEL_DIR/
-rm -rf $KERNEL_DIR/out/
-echo ""
+		mv $KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb $ANYKERNEL_DIR/
+		cd $ANYKERNEL_DIR
+		echo ""
+		echo "zipping"
+		DATE_CLOCK=$(date +'%H%M-%d%m%Y')
+		zip -r9 $ZIPNAME META-INF ramdisk tools anykernel.sh banner Image.gz-dtb
+		mv $ZIPNAME $KERNEL_DIR/
+		echo ""
 
-echo "Cleaning AnyKernel3 dir"
-echo ""
-rm -rf $ANYKERNEL_DIR/*.zip
-rm -rf $ANYKERNEL_DIR/Image.gz-dtb
+		echo "Cleaning AnyKernel3 dir"
+		echo ""
+		rm -rf $ANYKERNEL_DIR/*.zip
+		rm -rf $ANYKERNEL_DIR/Image.gz-dtb
+		echo "****** build done! ******"
+		echo ""
+		echo "Your kernel zip name is $ZIPNAME"
+		echo ""
+		BUILD_END=$(date +"%s")
+		DIFF=$(($BUILD_END - $BUILD_START))
+		echo -e "Build completed in '$(($DIFF / 60))' minute(s) and '$(($DIFF % 60))' seconds"
+	else
+		echo " Kernel build failed! abort zipping..."
+	fi
 
-echo "****** build done! ******"
-echo ""
-echo "Your kernel zip name is $ZIPNAME"
-echo ""
-BUILD_END=$(date +"%s")
-DIFF=$(($BUILD_END - $BUILD_START))
-echo -e "Build completed in '$(($DIFF / 60))' minute(s) and '$(($DIFF % 60))' seconds"
+	rm -rf $KERNEL_DIR/out/
+}
 
+build_non_ksu() {
+	sed -i 's/CONFIG_KSU=y/# CONFIG_KSU is not set/g' $KERNEL_DIR/arch/arm64/configs/${DEVICE}_defconfig
+	sed -i 's/CONFIG_OVERLAY_FS_REDIRECT_DIR=y/# CONFIG_OVERLAY_FS_REDIRECT_DIR is not set/g' $KERNEL_DIR/arch/arm64/configs/${DEVICE}_defconfig
+	sed -i 's/CONFIG_OVERLAY_FS_INDEX=y/# CONFIG_OVERLAY_FS_INDEX is not set/g' $KERNEL_DIR/arch/arm64/configs/${DEVICE}_defconfig
+	ZIPNAME=$KERNELVER-$DEVICE-Oxygen+-$DATE_CLOCK.zip
+}
+
+build_ksu() {
+	sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/g' $KERNEL_DIR/arch/arm64/configs/${DEVICE}_defconfig
+	sed -i 's/# CONFIG_OVERLAY_FS_REDIRECT_DIR is not set/CONFIG_OVERLAY_FS_REDIRECT_DIR=y/g' $KERNEL_DIR/arch/arm64/configs/${DEVICE}_defconfig
+	sed -i 's/# CONFIG_OVERLAY_FS_INDEX is not set/CONFIG_OVERLAY_FS_INDEX=y/g' $KERNEL_DIR/arch/arm64/configs/${DEVICE}_defconfig
+	ZIPNAME=$KERNELVER-$DEVICE-Oxygen+-KernelSU-$DATE_CLOCK.zip
+}
+
+choose_build() {
+	echo ""
+	echo "****** Building kernel for $DEVICE ******"
+	echo ""
+	while true; do
+	    echo " "
+	    echo "1. Build kernel without KernelSU"
+	    echo "2. Build kernel with KernelSU"
+	    read -p "" choose
+	    case $choose in
+		1 ) 
+		build_non_ksu
+		build
+		exit;;
+		2 )
+		build_ksu
+		build
+		exit;;
+		* ) 
+		echo "Please answer 1 or 2.";;
+	    esac
+	done
+
+}
+
+DEVICE=beryllium
+choose_build
